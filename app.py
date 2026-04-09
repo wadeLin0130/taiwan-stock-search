@@ -59,7 +59,7 @@ def download_stock_data(symbols, period, timeframe):
             period=period, 
             interval=timeframe, 
             group_by='ticker', 
-            threads=10, 
+            threads=30, 
             progress=False
         )
         return data
