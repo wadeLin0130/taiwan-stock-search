@@ -68,8 +68,8 @@ def download_stock_data(symbols, period, timeframe):
         return pd.DataFrame()
 
 def main():
-    st.title("台股歷史 K 線型態搜尋器")
-    st.markdown("設定好指定的 K 棒顏色序列，程式將自動匹配出符合該型態的台股標的。")
+    st.title("台股K棒組合搜尋器")
+    st.markdown("設定好指定的K棒顏色順序，將自動搜尋出符合該組合的台股標的，破解分析師蓋牌猜猜樂。")
 
     # 讀取股票清單
     stock_symbols = load_stock_symbols('tw_stocks.csv')
