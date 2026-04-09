@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 
 # 設定網頁標題與排版
-st.set_page_config(page_title="台股 K 線型態搜尋器", layout="wide")
+st.set_page_config(page_title="台股K棒組合搜尋器", layout="wide")
 
 # 初始化 Session State，用於快捷按鈕的文字狀態管理
 if 'pattern_str' not in st.session_state:
@@ -89,7 +89,7 @@ def main():
         with cols[0]: st.button("漲", on_click=update_pattern, args=("append", "漲"))
         with cols[1]: st.button("跌", on_click=update_pattern, args=("append", "跌"))
         with cols[2]: st.button("平", on_click=update_pattern, args=("append", "平"))
-        with cols[3]: st.button("退格", on_click=update_pattern, args=("backspace",))
+        with cols[3]: st.button("倒退", on_click=update_pattern, args=("backspace",))
         with cols[4]: st.button("清空", on_click=update_pattern, args=("clear",))
         
         st.divider()
@@ -116,7 +116,7 @@ def main():
             st.error("請輸入欲尋找的型態。")
             return
 
-        with st.spinner('正在從 Yahoo Finance 獲取資料 (初次下載約需數十秒，後續具備 12 小時快取)...'):
+        with st.spinner('正在從 Yahoo Finance 獲取資料 (初次下載約需數十秒)...'):
             data = download_stock_data(stock_symbols, period, timeframe)
 
         if data.empty:
