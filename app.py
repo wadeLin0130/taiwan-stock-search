@@ -223,12 +223,14 @@ def main():
                 st.markdown(f"**匹配序列：** {get_colored_sequence_html(matched_sequence, up_color, down_color, flat_color)}", unsafe_allow_html=True)
                 
                 with st.spinner("正在載入近一年歷史資料..."):
-                    chart_df = yf.download(selected_symbol, period="1y", interval="1d", progress=False)
-                    if isinstance(chart_df.columns, pd.MultiIndex):
-                        if selected_symbol in chart_df.columns.levels[0]:
-                            chart_df = chart_df[selected_symbol]
-                    
-                    chart_df = chart_df.dropna(subset=['Open', 'Close'])
+                    # 改用 yf.Ticker().history() 確保單一標的的回傳格式為平坦結構
+                    ticker = yf.Ticker(selected_symbol)
+                    chart_df = ticker.history(period="1y", interval="1d")
+
+                    if not chart_df.empty and 'Open' in chart_df.columns and 'Close' in chart_df.columns:
+                        chart_df = chart_df.dropna(subset=['Open', 'Close'])
+                    else:
+                        chart_df = pd.DataFrame()
 
                     if not chart_df.empty:
                         # 建立 Plotly 互動式 K 線圖
