@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
 # 設定網頁標題與排版
-st.set_page_config(page_title="台股 K 線型態搜尋器", layout="wide")
+st.set_page_config(page_title="台股 K 棒組合搜尋工具", layout="wide")
 
 # 初始化 Session State，用於狀態管理
 if 'pattern_str' not in st.session_state:
@@ -77,12 +77,12 @@ def download_stock_data(symbols, period, timeframe):
         )
         return data
     except Exception as e:
-        st.error(f"下載過程發生錯誤: {str(e)}")
+        st.error(f"發生錯誤: {str(e)}")
         return pd.DataFrame()
 
 def main():
-    st.title("台股歷史 K 線型態搜尋器")
-    st.markdown("設定好指定的 K 棒顏色序列，程式將自動匹配出符合該型態的台股標的。點擊搜尋結果即可查看互動式 K 線圖。")
+    st.title("台股 K 棒組合搜尋工具")
+    st.markdown("設定好指定的 K 棒顏色排列，搜尋符合該組合的台股標的，破解分析師蓋牌猜猜樂。")
 
     stock_symbols = load_stock_symbols('tw_stocks.csv')
     if not stock_symbols:
@@ -142,14 +142,14 @@ def main():
             st.error("請輸入欲尋找的型態。")
             return
 
-        with st.spinner('正在從 Yahoo Finance 獲取資料 (初次下載約需數十秒，後續具備 12 小時快取)...'):
+        with st.spinner('正在獲取資料...'):
             data = download_stock_data(stock_symbols, period, timeframe)
 
         if data.empty:
             st.error("資料獲取失敗或無資料回傳。")
             return
 
-        with st.spinner('資料載入完畢，正在進行特徵比對...'):
+        with st.spinner('資料載入完畢，正在進行比對...'):
             matched_stocks = []
             
             for symbol in stock_symbols:
