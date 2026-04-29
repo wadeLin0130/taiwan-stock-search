@@ -7,11 +7,14 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
 # 設定網頁標題與排版
-st.set_page_config(page_title="台股歷史 K 棒組合搜尋工具", layout="wide")
+st.set_page_config(page_title="台股 K 線型態搜尋器", layout="wide")
 
 # 初始化 Session State，用於狀態管理
 if 'pattern_str' not in st.session_state:
-    st.session_state.pattern_str = "跌跌跌跌漲漲漲跌跌"
+    st.session_state.pattern_str = "漲漲跌漲"
+
+if 'high_rank_str' not in st.session_state:
+    st.session_state.high_rank_str = ""
 
 if 'df_result' not in st.session_state:
     st.session_state.df_result = None
@@ -84,7 +87,6 @@ def download_stock_data_chunked(symbols, period, timeframe):
                 threads=10, 
                 progress=False
             )
-            # 將下載的大表拆解為獨立 DataFrame 並存入字典
             if isinstance(data.columns, pd.MultiIndex):
                 for sym in chunk:
                     if sym in data.columns.levels[0]:
@@ -105,8 +107,8 @@ def download_stock_data_chunked(symbols, period, timeframe):
     return result_dict
 
 def main():
-    st.title("台股歷史 K 棒組合搜尋工具")
-    st.markdown("設定好指定的 K 棒顏色組合，搜尋符合該組合的台股標的。破解分析師蓋牌。")
+    st.title("台股歷史 K 線型態搜尋器")
+    st.markdown("設定好指定的 K 棒顏色序列與高低排列組合，程式將自動匹配出獨一無二的台股標的。點擊搜尋結果即可查看標示出匹配區間的互動式圖表。")
 
     stock_symbols = load_stock_symbols('tw_stocks.csv')
     if not stock_symbols:
@@ -128,8 +130,8 @@ def main():
 
         st.divider()
 
-        st.subheader("尋找型態")
-        st.text_input("輸入型態字串", key="pattern_str")
+        st.subheader("尋找型態 (必填)")
+        st.text_input("輸入顏色型態字串", key="pattern_str")
         
         cols = st.columns(5)
         with cols[0]: st.button("漲", on_click=update_pattern, args=("append", "漲"))
@@ -141,6 +143,16 @@ def main():
         st.markdown("目標型態預覽：")
         st.markdown(get_colored_sequence_html(st.session_state.pattern_str, up_color, down_color, flat_color), unsafe_allow_html=True)
         
+        st.divider()
+
+        st.subheader("HIGH 排序過濾 (選填)")
+        st.text_input(
+            "輸入排序數字", 
+            key="high_rank_str", 
+            placeholder="例如：2314657",
+            help="針對匹配到的K棒，檢查最高價(High)的相對大小排名。1代表最高價。\n例如輸入：2314657。長度必須與K線顏色數量一致。"
+        )
+
         st.divider()
         
         timeframe_raw = st.selectbox("K線週期", ["日線 (1d)", "週線 (1wk)", "月線 (1mo)"])
@@ -159,12 +171,27 @@ def main():
 
     if start_search:
         target_pattern = st.session_state.pattern_str.strip()
+        target_high_rank = st.session_state.high_rank_str.strip()
         
         if not target_pattern:
-            st.error("請輸入欲尋找的Ｋ棒組合。")
+            st.error("請輸入欲尋找的顏色型態。")
             return
+            
+        pattern_len = len(target_pattern)
+        
+        # 驗證 HIGH 排序輸入格式
+        user_ranks = []
+        if target_high_rank:
+            if ',' in target_high_rank:
+                user_ranks = target_high_rank.replace(' ', '').split(',')
+            else:
+                user_ranks = list(target_high_rank.replace(' ', ''))
+                
+            if len(user_ranks) != pattern_len:
+                st.error(f"輸入的 HIGH 排序長度 ({len(user_ranks)}) 與 K 線顏色長度 ({pattern_len}) 不一致，請檢查！")
+                return
 
-        # 取得資料 (有快取時進度條會瞬間跑完)
+        # 取得資料
         data_dict = download_stock_data_chunked(stock_symbols, period, timeframe)
 
         if not data_dict:
@@ -183,10 +210,10 @@ def main():
             df = data_dict.get(symbol)
             if df is None or df.empty: continue
                 
-            if 'Open' not in df.columns or 'Close' not in df.columns: continue
+            if 'Open' not in df.columns or 'Close' not in df.columns or 'High' not in df.columns: continue
             
-            df = df.dropna(subset=['Open', 'Close'])
-            if df.empty or len(df) < lookback_bars: continue
+            df = df.dropna(subset=['Open', 'Close', 'High'])
+            if df.empty or len(df) < lookback_bars or len(df) < pattern_len: continue
                 
             df = df.tail(lookback_bars)
             latest_close = float(df['Close'].iloc[-1])
@@ -196,12 +223,47 @@ def main():
             colors = [get_kline_color(float(row['Open']), float(row['Close'])) for _, row in df.iterrows()]
             color_sequence = "".join(colors)
             
-            if target_pattern in color_sequence:
+            # 尋找所有符合顏色的起始位置 (從最舊到最新)
+            starts = [idx for idx in range(len(color_sequence) - pattern_len + 1) if color_sequence[idx:idx+pattern_len] == target_pattern]
+            
+            # 反轉清單，優先尋找最靠近現在 (最新) 的匹配點
+            starts.reverse()
+            best_match_pos = -1
+            best_rank_str = ""
+            matched = False
+            
+            for start_idx in starts:
+                # 擷取該段時間的 High 價格
+                segment_highs = df['High'].iloc[start_idx : start_idx + pattern_len].tolist()
+                
+                # 計算 High 排名 (1 為最高價)
+                sorted_indices = sorted(range(pattern_len), key=lambda x: segment_highs[x], reverse=True)
+                ranks = [0] * pattern_len
+                for rank0, orig_idx in enumerate(sorted_indices):
+                    ranks[orig_idx] = rank0 + 1
+                    
+                rank_str = ",".join(map(str, ranks)) if pattern_len > 9 else "".join(map(str, ranks))
+                calc_ranks = list(map(str, ranks))
+                
+                if target_high_rank:
+                    if user_ranks == calc_ranks:
+                        best_match_pos = start_idx + 1
+                        best_rank_str = rank_str
+                        matched = True
+                        break # 找到完全吻合的就跳出
+                else:
+                    best_match_pos = start_idx + 1
+                    best_rank_str = rank_str
+                    matched = True
+                    break # 沒有進階條件，符合顏色即算找到
+            
+            if matched:
                 matched_stocks.append({
                     '股票代號': symbol,
                     '最新收盤價': round(latest_close, 2),
                     '近期K線序列': color_sequence,
-                    '匹配位置': color_sequence.find(target_pattern) + 1
+                    '匹配位置': best_match_pos,
+                    'HIGH排序': best_rank_str
                 })
                 
         progress_bar.empty()
@@ -213,7 +275,7 @@ def main():
 
     if st.session_state.df_result is not None:
         if not st.session_state.df_result.empty:
-            st.success(f"搜尋完成。共找到 {len(st.session_state.df_result)} 檔符合條件的股票。打勾看K線圖")
+            st.success(f"搜尋完成。共找到 {len(st.session_state.df_result)} 檔符合條件的股票。請在下方表格點擊任一列來查看標示圖表。")
             
             selection_event = st.dataframe(
                 st.session_state.df_result, 
@@ -224,6 +286,7 @@ def main():
                     "股票代號": st.column_config.TextColumn("股票代號"),
                     "最新收盤價": st.column_config.NumberColumn("最新收盤價", format="%.2f"),
                     "近期K線序列": st.column_config.TextColumn("近期K線序列"),
+                    "HIGH排序": st.column_config.TextColumn("HIGH排序"),
                     "匹配位置": st.column_config.NumberColumn("匹配位置")
                 },
                 hide_index=True
@@ -241,13 +304,12 @@ def main():
                 st.subheader(f"{selected_symbol} 走勢分析與特徵核對")
                 st.markdown(f"**匹配序列：** {get_colored_sequence_html(matched_sequence, up_color, down_color, flat_color)}", unsafe_allow_html=True)
                 
-                # 直接沿用已在記憶體中的資料，大幅減少載入延遲
-                # 需要重新呼叫快取函數取得完整字典 (會瞬間回傳)
+                # 直接沿用快取資料，大幅減少載入延遲
                 data_dict = download_stock_data_chunked(stock_symbols, period, timeframe)
                 chart_df = data_dict.get(selected_symbol)
 
                 if chart_df is not None and not chart_df.empty:
-                    chart_df = chart_df.dropna(subset=['Open', 'Close'])
+                    chart_df = chart_df.dropna(subset=['Open', 'Close', 'High'])
                     
                     lookback_df = chart_df.tail(lookback_bars)
                     x_min = lookback_df.index[0]
@@ -258,6 +320,7 @@ def main():
                     match_end_idx = match_start_idx + len(target_pattern) - 1
                     highlight_start = lookback_df.index[match_start_idx]
                     highlight_end = lookback_df.index[match_end_idx]
+                    match_df = lookback_df.iloc[match_start_idx : match_end_idx + 1]
 
                     fig = go.Figure(data=[go.Candlestick(
                         x=chart_df.index,
@@ -270,19 +333,44 @@ def main():
                     # 加入半透明方塊，標示出吻合的特徵區域
                     fig.add_vrect(
                         x0=highlight_start, x1=highlight_end,
-                        fillcolor="rgba(135, 206, 250, 0.4)",
+                        fillcolor="rgba(135, 206, 250, 0.3)",
                         layer="below",
                         line_width=2,
                         line_color="rgba(135, 206, 250, 1)",
                         annotation_text=" 匹配位置",
-                        annotation_position="top left",
+                        annotation_position="bottom left",
                         annotation_font=dict(color="#1f77b4", size=14, weight="bold")
                     )
                     
+                    # 計算該區段的 High 排序，並在圖表加上註解標籤
+                    segment_highs = match_df['High'].tolist()
+                    sorted_indices = sorted(range(len(target_pattern)), key=lambda x: segment_highs[x], reverse=True)
+                    ranks = [0] * len(target_pattern)
+                    for rank0, orig_idx in enumerate(sorted_indices):
+                        ranks[orig_idx] = rank0 + 1
+                        
+                    for i, rank in enumerate(ranks):
+                        fig.add_annotation(
+                            x=match_df.index[i],
+                            y=match_df['High'].iloc[i],
+                            text=f" <b>{rank}</b> ",
+                            showarrow=True,
+                            arrowhead=2,
+                            arrowsize=1,
+                            arrowwidth=2,
+                            ax=0,
+                            ay=-35,
+                            font=dict(color="#FF8C00", size=15),
+                            bgcolor="rgba(255, 255, 255, 0.8)",
+                            bordercolor="#FF8C00",
+                            borderwidth=2,
+                            borderpad=3
+                        )
+                    
                     fig.update_layout(
-                        title=f"{selected_symbol} 歷史走勢 (已縮放至近期 {lookback_bars} 根，可滑動查看完整歷史)",
+                        title=f"{selected_symbol} 歷史走勢 (橘色標籤為K棒最高價排名)",
                         xaxis_rangeslider_visible=True,
-                        height=550,
+                        height=600,
                         margin=dict(l=0, r=0, t=50, b=0)
                     )
                     
@@ -290,7 +378,7 @@ def main():
                     if timeframe == '1d':
                         rangebreaks.append(dict(bounds=["sat", "mon"]))
                     
-                    # 強制設定 X 軸預設顯示範圍為搜尋指定的 K 棒數
+                    # 強制設定 X 軸預設顯示範圍
                     fig.update_xaxes(
                         range=[x_min, x_max],
                         rangebreaks=rangebreaks
@@ -300,7 +388,7 @@ def main():
                 else:
                     st.warning("無法取得此標的的歷史資料供繪圖。")
         else:
-            st.info("條件過濾後，未找到完全符合型態的股票。您可以嘗試縮短型態字串或放寬股價限制。")
+            st.info("條件過濾後，未找到完全符合型態的股票。您可以嘗試放寬排序或股價限制。")
 
 if __name__ == "__main__":
     main()
